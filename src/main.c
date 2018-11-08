@@ -1,5 +1,7 @@
 #include <zephyr.h>
 #include <gpio.h>
+#include <pinmux.h>
+#include <soc.h>
 #include <logging/log.h>
 
 LOG_MODULE_REGISTER(main);
@@ -13,10 +15,16 @@ LOG_MODULE_REGISTER(main);
 #define I2C (SERCOM5->I2CS)
 #define IRQ SERCOM5_IRQn
 
-#define WORKAROUND 1
+#define WORKAROUND 0
 
 /////////////////////////////////
 // PB16(SDA) PB17(SCL) SERCOM5 //
+/////////////////////////////////
+/////////////////////////////////
+// PA08(SDA) PA09(SCL) SERCOM0 //
+/////////////////////////////////
+/////////////////////////////////
+// PA22(SDA) PA23(SCL) SERCOM5 //
 /////////////////////////////////
 
 struct i2c_state {
@@ -53,11 +61,13 @@ void i2c_reset(void)
 void i2c_init_slave(void)
 {
     i2c_sync();
-    I2C.CTRLA.reg |= SERCOM_I2CS_CTRLA_MODE_I2C_SLAVE;
+    I2C.CTRLA.reg =
+            SERCOM_I2CS_CTRLA_MODE_I2C_SLAVE;// | SERCOM_I2CS_CTRLA_SDAHOLD(0x2);
     // TODO CTRLA LOWTOUT SDAHOLD
 
     i2c_sync();
-    I2C.CTRLB.reg |= 0;
+//    I2C.CTRLB.reg |= SERCOM_I2CS_CTRLB_AMODE(0) | SERCOM_I2CS_CTRLB_SMEN;
+    I2C.CTRLB.reg = SERCOM_I2CS_CTRLB_AMODE(0);
     // TODO CTRLB AMODE SMEN
 
     i2c_sync();
@@ -75,6 +85,8 @@ void i2c_init_slave(void)
     I2C.CTRLA.reg |= SERCOM_I2CS_CTRLA_ENABLE;
 }
 
+static u8_t last_data;
+
 static int write_requested(u8_t addr)
 {
     LOG_INF("wreq %x", addr);
@@ -83,21 +95,27 @@ static int write_requested(u8_t addr)
 
 static int write_received(u8_t val)
 {
-    LOG_INF("wreq %x", val);
+//    LOG_INF("wrec %x", val);
+    last_data = val;
     return 0;
 }
 
 static int read_requested(u8_t addr, u8_t *val)
 {
     LOG_INF("rreq %x", addr);
-    *val = 0xAB;
+    *val = last_data;
+    *val = 0x40;
     return 0;
 }
 
 static int read_processed(u8_t *val)
 {
-    LOG_INF("rpro");
-    *val = 0xAB;
+    static u8_t data = 120;
+//    LOG_INF("rpro");
+    data = data + 1;
+//    *val = data | 0x40;
+    *val = data;
+    *val = 0xAA;
     return 0;
 }
 
@@ -135,7 +153,7 @@ static inline void i2c_set_ackact(bool ack)
 #endif
 }
 
-static inline void i2c_cmd3()
+static inline void i2c_amatch_cmd3()
 {
 #if WORKAROUND
     if (I2C.INTFLAG.bit.PREC) {
@@ -155,10 +173,11 @@ static void isr_i2c_slave_amatch(void)
         error_received();
     }
 
-    u8_t addr = I2C.DATA.reg; // TODO ???
+    u8_t addr = I2C.DATA.reg >> 1;
     int err;
 
-    if (I2C.STATUS.bit.DIR) {
+    i2c_state.read_dir = I2C.STATUS.reg & SERCOM_I2CS_STATUS_DIR;
+    if (i2c_state.read_dir) {
         /* Master read requested. */
         err = read_requested(addr, &i2c_state.read_data);
         if (!err) {
@@ -172,7 +191,7 @@ static void isr_i2c_slave_amatch(void)
 
     /* ACK or NAK the address. */
     i2c_set_ackact(err == 0);
-    i2c_cmd3();
+    i2c_amatch_cmd3();
 
     i2c_set_ackact(true);
 }
@@ -181,17 +200,17 @@ static void isr_i2c_slave_drdy(void)
 {
     int err;
 
-    if (I2C.STATUS.reg & SERCOM_I2CS_STATUS_RXNACK) {
-        /* Master NAK. */
-        error_received();
-        err = EIO;
-    } else if (i2c_state.read_dir) {
+    if (i2c_state.read_dir) {
         /* Master read data. */
         if (i2c_state.read_start) {
             /* Send the first byte. */
             I2C.DATA.reg = i2c_state.read_data;
             i2c_state.read_start = false;
             err = 0;
+        } else if ((I2C.STATUS.reg & SERCOM_I2CS_STATUS_RXNACK)) {
+            /* Master NAK. */
+//            error_received();
+            err = EIO; // TODO EOF
         } else {
             /* Ask for a byte to send. */
             u8_t data;
@@ -212,7 +231,7 @@ static void isr_i2c_slave_drdy(void)
         I2C.CTRLB.reg |= SERCOM_I2CS_CTRLB_CMD(0x2);
     } else {
         /* Continue in the transfer. */
-        i2c_cmd3();
+        I2C.CTRLB.reg |= SERCOM_I2CS_CTRLB_CMD(0x3);
     }
 }
 
@@ -247,23 +266,37 @@ void main(void)
     gpio_pin_configure(port, LED, GPIO_DIR_OUT);
     gpio_pin_write(port, LED, 1);
 
+    struct device *muxa = device_get_binding("PINMUX_A");
     struct device *muxb = device_get_binding("PINMUX_B");
 
-    pinmux_pin_set(muxb, 16, PINMUX_FUNC_C);
-    pinmux_pin_set(muxb, 17, PINMUX_FUNC_C);
+//    pinmux_pin_set(muxb, 16, PINMUX_FUNC_C);
+//    pinmux_pin_set(muxb, 17, PINMUX_FUNC_C);
+//    pinmux_pin_set(muxa, 8, PINMUX_FUNC_C);
+//    pinmux_pin_set(muxa, 9, PINMUX_FUNC_C);
+    pinmux_pin_set(muxa, 22, PINMUX_FUNC_D);
+    pinmux_pin_set(muxa, 23, PINMUX_FUNC_D);
     // TODO pull up?
 
     /* Set up bus clock and GCLK generator. */
     PM->APBCMASK.reg |= PM_APBCMASK_SERCOM5;
-    GCLK->CLKCTRL.reg = GCLK_CLKCTRL_ID(SERCOM5_GCLK_ID_SLOW)
-            | GCLK_CLKCTRL_CLKEN
-            | GCLK_CLKCTRL_GEN(1);
 
-    while (GCLK->STATUS.bit.SYNCBUSY) {
-        /* Synchronize GCLK. */
-    }
+//    GCLK->CLKCTRL.reg = GCLK_CLKCTRL_ID(SERCOM3_GCLK_ID_CORE)
+//            | GCLK_CLKCTRL_CLKEN
+//            | GCLK_CLKCTRL_GEN(0);
+//
+//    while (GCLK->STATUS.bit.SYNCBUSY) {
+//        /* Synchronize GCLK. */
+//    }
+//
+//    GCLK->CLKCTRL.reg = GCLK_CLKCTRL_ID(SERCOM3_GCLK_ID_SLOW)
+//            | GCLK_CLKCTRL_CLKEN
+//            | GCLK_CLKCTRL_GEN(1);
+//
+//    while (GCLK->STATUS.bit.SYNCBUSY) {
+//        /* Synchronize GCLK. */
+//    }
 
-    i2c_reset();
+//    i2c_reset();
 
     i2c_init_slave();
 
@@ -276,7 +309,7 @@ void main(void)
         k_sleep(200 * p / 20);
         gpio_pin_write(port, LED, 1);
         k_sleep(800 * p / 20);
-        LOG_INF("baf %d!", p);
+//        LOG_INF("baf %d!", p);
         p--;
         if (p < 0) {
             p = 20;
