@@ -104,7 +104,7 @@ static int read_requested(u8_t addr, u8_t *val)
 {
     LOG_INF("rreq %x", addr);
     *val = last_data;
-    *val = 0x40;
+    *val = 0x3A;
     return 0;
 }
 
