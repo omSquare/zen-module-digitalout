@@ -15,14 +15,9 @@
  * Enumeration of all possible Zbus states.
  */
 enum zbus_state {
-    /* The initial state before zbus_init is called. */
-            ZBUS_OFF,
-
-    /* The configuration phase when the bus waits for address assignment. */
-            ZBUS_CONF,
-
-    /* The ready state when data packets can be sent and received. */
-            ZBUS_READY,
+    ZBUS_OFF,   // The initial state before zbus_init is called.
+    ZBUS_CONF,  // The configuration phase.
+    ZBUS_READY, // The ready state when data packets can be sent and received.
 };
 
 struct zbus_device {
