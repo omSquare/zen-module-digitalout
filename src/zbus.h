@@ -61,12 +61,12 @@ struct zbus_config {
     u8_t udid[8];
     // TODO(mbenda): other device attributes (flags, vendor, type)
 
-    // sercom I2C index
+    // SERCOM I²C index
     int sercom;
 
     // alert port/pin
     const char *port_label;
-    int pin;
+    u32_t pin;
 };
 
 /**
