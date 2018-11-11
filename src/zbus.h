@@ -20,34 +20,6 @@ enum zbus_state {
     ZBUS_READY, // The ready state when data packets can be sent and received.
 };
 
-struct zbus_device {
-    const struct zbus_config *config;
-    struct zbus_data *data;
-};
-
-/**
- * The state data of a Zbus device.
- */
-struct zbus_data {
-    // the state of the bus
-    enum zbus_state state;
-
-    // address (0 when not in ZBUS_RDY state)
-    u8_t addr;
-
-    // packet receiving
-    u8_t recv_buf[ZBUS_MAX_DATA];
-    int recv_len;
-    int recv_pos;
-
-    // packet sending
-    const u8_t *send_buf;
-    int send_len;
-    int send_pos;
-
-    // TODO(mbenda): stats, error counters...
-};
-
 /**
  * The configuration of a Zbus device.
  */
@@ -70,40 +42,36 @@ struct zbus_config {
  * @param bus
  * @return
  */
-int zbus_init(struct zbus_device *bus);
+int zbus_init(struct zbus_config *cfg);
 
 /**
  * Receives a data packet from the master.
  *
- * @param zbus the Zbus device
  * @param buf data buffer to store received bytes
  * @param size size of the buffer
  * @return number of received bytes on success, -errno on failure
  */
-int zbus_recv(struct zbus_device *bus, void *buf, int size); // blocks
+int zbus_recv(void *buf, int size); // blocks
 
 /**
  * Sends the specified data to the master.
  *
- * @param bus the Zbus device
  * @param buf data buffer to send
  * @param size size of the buffer
  * @return 0 on success, -errno on failure
  */
-int zbus_send(struct zbus_device *bus, const void *buf, int size); // blocks
+int zbus_send(const void *buf, int size); // blocks
 
 /**
  * Resets the state of the bus and starts its configuration phase.
  *
- * @param bus the Zbus device
  * @return 0 on success, -errno on failure
  */
-int zbus_reset(struct zbus_device *bus);
+int zbus_reset(void);
 
 /**
  * Checks if the bus is ready.
  *
- * @param bus the Zbus device
  * @return true if ready, false if not (off or configuring)
  */
-bool zbus_is_ready(struct zbus_device *bus);
+bool zbus_is_ready(void);
