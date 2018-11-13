@@ -10,7 +10,9 @@
 #include <soc.h>
 #include <gpio.h>
 #include <posix/pthread.h>
-#include <component/sercom.h>
+#include <logging/log.h>
+
+LOG_MODULE_REGISTER(zbus);
 
 // "configuration" address
 #define CONF_ADDR 0x76
@@ -50,6 +52,22 @@ static struct {
     // TODO(mbenda): stats, error counters...
 } zbus;
 
+static struct {
+    void *fifo_header;
+    volatile int ev;
+} zbus_event;
+
+#define EV_DONE     0x01
+#define EV_ERR_DATA 0x02
+#define EV_ERR_BUS  0x04
+
+void zbus_worker(void *, void *, void *);
+static void i2c_reset(void);
+static void i2c_enable_conf(void);
+static void i2c_isr(void *arg);
+
+K_FIFO_DEFINE(zbus_fifo);
+
 // TX buffer for POLL replies
 u8_t zbus_poll_buf[8];
 
@@ -60,9 +78,8 @@ static PTHREAD_MUTEX_DEFINE(zbus_lock);
 static PTHREAD_COND_DEFINE(zbus_recv_cond);
 static PTHREAD_COND_DEFINE(zbus_send_cond);
 
-static void i2c_reset(void);
-static void i2c_enable_conf(void);
-static void i2c_isr(void *arg);
+K_THREAD_DEFINE(zbus_thread, 1024, zbus_worker, NULL, NULL, NULL, -1, 0,
+        K_NO_WAIT);
 
 int zbus_init(struct zbus_config *cfg)
 {
@@ -131,6 +148,28 @@ bool zbus_is_ready(void)
     return zbus.state == ZBUS_READY;
 }
 
+void zbus_worker(void *p1, void *p2, void *p3)
+{
+    ARG_UNUSED(p1);
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
+
+    LOG_INF("worker started");
+
+    while (true) {
+        // read next event
+        k_fifo_get(&zbus_fifo, K_FOREVER);
+        int ev = zbus_event.ev;
+        zbus_event.ev = 0;
+
+        LOG_DBG("processing event %x", ev);
+    }
+}
+
+// ----------------------------------------------------------------------
+// SERCOM I²C bus
+// ----------------------------------------------------------------------
+
 // TODO(mbenda): are all sync necessary?
 
 static inline void i2c_sync(void)
@@ -178,6 +217,19 @@ static inline void i2c_set_tx(const void *buf, int size)
     zbus.tx_buf = buf;
     zbus.tx_pos = 0;
     zbus.tx_len = size;
+}
+
+static inline int i2c_notify(int ev)
+{
+    if (zbus_event.ev) {
+        // event not consumed yet
+        return -1;
+    }
+
+    zbus_event.ev = ev;
+
+    k_fifo_put(&zbus_fifo, &zbus_event);
+    return 0;
 }
 
 static void i2c_disable(void)
@@ -237,10 +289,12 @@ void i2c_enable_ready(void)
 void i2c_amatch(void)
 {
     // address match
+    int ev = 0;
+
     if (I2C->STATUS.reg & (SERCOM_I2CS_STATUS_BUSERR
             | SERCOM_I2CS_STATUS_COLL | SERCOM_I2CS_STATUS_LOWTOUT)) {
         // a bus error occurred
-        // TODO(mbenda): implement this
+        ev |= EV_ERR_BUS;
     }
 
     // get the address and check direction
@@ -279,16 +333,19 @@ void i2c_amatch(void)
     // ACK/NAK the address
     if (err) {
         i2c_set_ackact(false);
-        I2C->INTENSET.reg = SERCOM_I2CS_INTENSET_DRDY
-                | SERCOM_I2CS_INTENSET_PREC;
+        ev |= EV_ERR_DATA;
     } else {
         i2c_set_ackact(true);
+        I2C->INTENSET.reg = SERCOM_I2CS_INTENSET_DRDY
+                | SERCOM_I2CS_INTENSET_PREC;
     }
 
     i2c_amatch_cmd3();
     i2c_set_ackact(true);
 
-    // TODO(mbenda): notify zbus worker
+    if (ev) {
+        i2c_notify(ev);
+    }
 }
 
 void i2c_drdy(void)
@@ -303,7 +360,6 @@ void i2c_drdy(void)
             err = true;
         } else if (zbus.tx_pos >= zbus.tx_len) {
             // buffer underflow
-            // TODO(mbenda): notify error?
             err = true;
         } else {
             I2C->DATA.reg = zbus.tx_buf[zbus.tx_pos++];
@@ -312,7 +368,6 @@ void i2c_drdy(void)
         // master is writing, receive another byte
         if (zbus.rx_pos >= zbus.rx_len) {
             // buffer overflow
-            // TODO(mbenda): notify error?
             err = true;
         } else {
             zbus.rx_buf[zbus.rx_pos++] = I2C->DATA.reg;
@@ -325,9 +380,9 @@ void i2c_drdy(void)
         I2C->CTRLB.reg |= SERCOM_I2CS_CTRLB_CMD(0x2);
         I2C->INTENCLR.reg = SERCOM_I2CS_INTENSET_DRDY
                 | SERCOM_I2CS_INTENSET_PREC;
-    }
 
-    // TODO(mbenda): notify zbus worker
+        i2c_notify(EV_ERR_DATA);
+    }
 }
 
 void i2c_prec(void)
@@ -337,7 +392,7 @@ void i2c_prec(void)
     I2C->INTENCLR.reg = SERCOM_I2CS_INTENSET_DRDY
             | SERCOM_I2CS_INTENSET_PREC;
 
-    // TODO(mbenda): notify zbus worker
+    i2c_notify(EV_DONE);
 }
 
 void i2c_isr(void *arg)
