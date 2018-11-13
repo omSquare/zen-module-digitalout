@@ -8,6 +8,14 @@
 
 #include <zephyr.h>
 
+/**
+ * Configuration.
+ */
+#define CONFIG_ZBUS_SERCOM 5
+#define CONFIG_ZBUS_ALERT_PORT "PORTA"
+#define CONFIG_ZBUS_ALERT_PIN 21
+#define CONFIG_I2C_SAM0_WORKAROUND 1
+
 /** The maximum size of a Zbus data packet. */
 #define ZBUS_MAX_DATA 128
 
@@ -27,13 +35,6 @@ struct zbus_config {
     // UDID
     u8_t udid[8];
     // TODO(mbenda): other device attributes (flags, vendor, type)
-
-    // SERCOM I²C index
-    int sercom;
-
-    // alert port/pin
-    const char *port_label;
-    u32_t pin;
 };
 
 /**
