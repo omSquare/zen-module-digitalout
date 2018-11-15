@@ -34,20 +34,24 @@ static struct {
     s8_t addr;
 
     // packet receiving
-    u8_t rx_buf[ZBUS_MAX_DATA];
-    int rx_len;
-    int rx_pos;
+    u8_t* rx_data;
+    u8_t rx_len;
 
     // packet sending
-    const u8_t *tx_buf;
-    int tx_len;
-    int tx_pos;
+    const u8_t *tx_data;
+    u8_t tx_len;
 
     // peripherals
     struct device *alert_port;
     u32_t alert_pin;
     bool i2c_read;
     s8_t i2c_addr;
+
+    // buffer
+    u8_t buf[ZBUS_MAX_DATA];
+    int buf_len;
+    int buf_pos;
+    s8_t buf_addr;
 
     // TODO(mbenda): stats, error counters...
 } zbus;
@@ -57,11 +61,12 @@ static struct {
     volatile int ev;
 } zbus_event;
 
-#define EV_DONE     0x01
-#define EV_ERR_DATA 0x02
-#define EV_ERR_BUS  0x04
+#define EV_DONE_RX  0x01
+#define EV_DONE_TX  0x02
+#define EV_ERR_DATA 0x04
+#define EV_ERR_BUS  0x08
 
-void zbus_worker(void *, void *, void *);
+static void zbus_worker(void *, void *, void *);
 static void i2c_reset(void);
 static void i2c_enable_conf(void);
 static void i2c_isr(void *arg);
@@ -80,6 +85,10 @@ static PTHREAD_COND_DEFINE(zbus_send_cond);
 
 K_THREAD_DEFINE(zbus_thread, 1024, zbus_worker, NULL, NULL, NULL, -1, 0,
         K_NO_WAIT);
+
+// ----------------------------------------------------------------------
+// Zbus API
+// ----------------------------------------------------------------------
 
 int zbus_init(struct zbus_config *cfg)
 {
@@ -108,13 +117,43 @@ int zbus_init(struct zbus_config *cfg)
 
 int zbus_recv(void *buf, int size)
 {
-// TODO mbenda: implement this
+    pthread_mutex_lock(&zbus_lock);
+
+    while (zbus.tx_data != NULL) {
+        // wait for other transfers to complete
+        pthread_cond_wait(&zbus_recv_cond, &zbus_lock);
+    }
+
+    // TODO(mbenda): lock this?
+    zbus.rx_data = buf;
+    zbus.rx_len = (u8_t) (size > ZBUS_MAX_DATA ? ZBUS_MAX_DATA : size);
+
+    // wait for transfer to complete
+    pthread_cond_wait(&zbus_send_cond, &zbus_lock);
+
+    // TODO(mbenda): return value
+    pthread_mutex_unlock(&zbus_lock);
     return 0;
 }
 
 int zbus_send(const void *buf, int size)
 {
-// TODO mbenda: implement this
+    pthread_mutex_lock(&zbus_lock);
+
+    while (zbus.tx_data != NULL) {
+        // wait for other transfers to complete
+        pthread_cond_wait(&zbus_send_cond, &zbus_lock);
+    }
+
+    // TODO(mbenda): lock this?
+    zbus.tx_data = buf;
+    zbus.tx_len = (u8_t) (size > ZBUS_MAX_DATA ? ZBUS_MAX_DATA : size);
+
+    // wait for transfer to complete
+    pthread_cond_wait(&zbus_send_cond, &zbus_lock);
+
+    // TODO(mbenda): return value
+    pthread_mutex_unlock(&zbus_lock);
     return 0;
 }
 
@@ -146,24 +185,6 @@ int zbus_reset(void)
 bool zbus_is_ready(void)
 {
     return zbus.state == ZBUS_READY;
-}
-
-void zbus_worker(void *p1, void *p2, void *p3)
-{
-    ARG_UNUSED(p1);
-    ARG_UNUSED(p2);
-    ARG_UNUSED(p3);
-
-    LOG_INF("worker started");
-
-    while (true) {
-        // read next event
-        k_fifo_get(&zbus_fifo, K_FOREVER);
-        int ev = zbus_event.ev;
-        zbus_event.ev = 0;
-
-        LOG_DBG("processing event %x", ev);
-    }
 }
 
 // ----------------------------------------------------------------------
@@ -212,17 +233,18 @@ static inline void i2c_amatch_cmd3()
 #endif
 }
 
-static inline void i2c_set_tx(const void *buf, int size)
+static inline void i2c_init_buf(void *buf, int size)
 {
-    zbus.tx_buf = buf;
-    zbus.tx_pos = 0;
-    zbus.tx_len = size;
+    memcpy(zbus.buf, buf, (size_t) size);
+    zbus.buf_pos = 0;
+    zbus.buf_len = size;
 }
 
 static inline int i2c_notify(int ev)
 {
     if (zbus_event.ev) {
         // event not consumed yet
+        k_panic(); // FIXME
         return -1;
     }
 
@@ -299,7 +321,9 @@ void i2c_amatch(void)
 
     // get the address and check direction
     u8_t addr = I2C->DATA.reg >> 1;
-    bool err = false;
+    bool nak = false;
+
+    // TODO(mbenda): check buf readiness?
 
     if (I2C->STATUS.reg & SERCOM_I2CS_STATUS_DIR) {
         // master reads data
@@ -307,33 +331,46 @@ void i2c_amatch(void)
 
         if (addr == zbus.addr) {
             // data read
-            // TODO(mbenda): implement this
+            if (zbus.tx_data == NULL) {
+                // no data to send
+                ev |= EV_ERR_DATA;
+                nak = true;
+            } else {
+                i2c_init_buf((void *) zbus.tx_data, zbus.tx_len);
+            }
         } else if (addr == CONF_ADDR) {
             // configuration read
-            i2c_set_tx(zbus_conf_buf, sizeof(zbus_conf_buf));
+            i2c_init_buf(zbus_conf_buf, sizeof(zbus_conf_buf));
         } else if (addr == POLL_ADDR) {
             // poll read
-            // TODO(mbenda): implement this
-            i2c_set_tx(zbus_poll_buf, sizeof(zbus_poll_buf));
+            if (zbus.rx_data == NULL) {
+                // nothing to send
+                nak = true;
+            } else {
+                zbus.buf[0] = (u8_t) zbus.addr;
+                zbus.buf[1] = (u8_t) zbus.tx_len;
+                zbus.buf_pos = 0;
+                zbus.buf_len = 2;
+            }
         } else {
             // NAK the address
-            err = true;
+            nak = true;
         }
     } else {
         // master writes data
         zbus.i2c_read = false;
         zbus.i2c_addr = addr;
 
-        if (zbus.rx_pos > 0) {
+        if (zbus.buf_pos > 0) {
             // buffer is not ready
-            err = true;
+            ev |= EV_ERR_DATA;
+            nak = true;
         }
     }
 
     // ACK/NAK the address
-    if (err) {
+    if (nak) {
         i2c_set_ackact(false);
-        ev |= EV_ERR_DATA;
     } else {
         i2c_set_ackact(true);
         I2C->INTENSET.reg = SERCOM_I2CS_INTENSET_DRDY
@@ -351,36 +388,37 @@ void i2c_amatch(void)
 void i2c_drdy(void)
 {
     // data ready
-    bool err = false;
+    bool nak = false;
 
     if (zbus.i2c_read) {
         // master is reading, send another byte
-        if (zbus.tx_pos > 0 && (I2C->STATUS.reg & SERCOM_I2CS_STATUS_RXNACK)) {
+        if (zbus.buf_pos > 0 && (I2C->STATUS.reg & SERCOM_I2CS_STATUS_RXNACK)) {
             // master NAK
-            err = true;
-        } else if (zbus.tx_pos >= zbus.tx_len) {
+            nak = true;
+        } else if (zbus.buf_pos >= zbus.buf_len) {
             // buffer underflow
-            err = true;
+            nak = true;
         } else {
-            I2C->DATA.reg = zbus.tx_buf[zbus.tx_pos++];
+            I2C->DATA.reg = zbus.buf[zbus.buf_pos++];
         }
     } else {
         // master is writing, receive another byte
-        if (zbus.rx_pos >= zbus.rx_len) {
+        if (zbus.buf_pos >= zbus.buf_len) {
             // buffer overflow
-            err = true;
+            nak = true;
         } else {
-            zbus.rx_buf[zbus.rx_pos++] = I2C->DATA.reg;
+            zbus.buf[zbus.buf_pos++] = I2C->DATA.reg;
         }
     }
 
-    if (err) {
+    if (nak) {
         // terminate the transfer
         i2c_set_ackact(false);
         I2C->CTRLB.reg |= SERCOM_I2CS_CTRLB_CMD(0x2);
         I2C->INTENCLR.reg = SERCOM_I2CS_INTENSET_DRDY
                 | SERCOM_I2CS_INTENSET_PREC;
 
+        // TODO(mbenda): store error and send it with "done" event?
         i2c_notify(EV_ERR_DATA);
     }
 }
@@ -392,7 +430,8 @@ void i2c_prec(void)
     I2C->INTENCLR.reg = SERCOM_I2CS_INTENSET_DRDY
             | SERCOM_I2CS_INTENSET_PREC;
 
-    i2c_notify(EV_DONE);
+    zbus.buf_addr = zbus.i2c_addr;
+    i2c_notify(zbus.i2c_read ? EV_DONE_TX : EV_DONE_RX);
 }
 
 void i2c_isr(void *arg)
@@ -408,5 +447,78 @@ void i2c_isr(void *arg)
         i2c_drdy();
     } else if (status & SERCOM_I2CS_INTFLAG_PREC) {
         i2c_prec();
+    }
+}
+
+// ----------------------------------------------------------------------
+// Zbus process
+// ----------------------------------------------------------------------
+
+static void zbus_worker(void *p1, void *p2, void *p3)
+{
+    ARG_UNUSED(p1);
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
+
+    LOG_INF("worker started");
+
+    while (true) {
+        // read next event
+        k_fifo_get(&zbus_fifo, K_FOREVER);
+        int ev = zbus_event.ev;
+        zbus_event.ev = 0;
+
+        LOG_DBG("processing event %x", ev);
+
+        pthread_mutex_lock(&zbus_lock);
+
+        if (ev & EV_DONE_RX) {
+            switch (zbus.buf_addr) {
+            case 0:
+                // reset
+                LOG_DBG("reset requested");
+                zbus_reset();
+                break;
+
+            case CONF_ADDR:
+                // address configuration
+                LOG_DBG("address configuration received");
+                zbus.addr = zbus.buf_addr;
+                i2c_enable_ready();
+                break;
+
+            default:
+                if (zbus.buf_addr == zbus.addr) {
+                    // data or ping received
+                    LOG_DBG("data packet received, len=%d", zbus.buf_len);
+                    pthread_cond_broadcast(&zbus_recv_cond);
+                }
+                break;
+            }
+        }
+
+        if (ev & EV_DONE_TX) {
+            switch (zbus.buf_addr) {
+            case POLL_ADDR:
+                // poll answered
+                LOG_DBG("data poll reply sent");
+                break;
+
+            case CONF_ADDR:
+                // discovery answered
+                LOG_DBG("discovery reply sent");
+                break;
+
+            default:
+                if (zbus.buf_addr == zbus.addr) {
+                    // data sent
+                    LOG_DBG("data packet sent, len=%d", zbus.buf_len);
+                    pthread_cond_broadcast(&zbus_send_cond);
+                }
+                break;
+            }
+        }
+
+        pthread_mutex_unlock(&zbus_lock);
     }
 }
