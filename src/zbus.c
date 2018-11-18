@@ -43,7 +43,6 @@ static struct {
 
     // peripherals
     struct device *alert_port;
-    u32_t alert_pin;
     bool i2c_read;
     s8_t i2c_addr;
 
@@ -92,24 +91,24 @@ K_THREAD_DEFINE(zbus_thread, 1024, zbus_worker, NULL, NULL, NULL, -1, 0,
 
 int zbus_init(struct zbus_config *cfg)
 {
+    // TODO(mbenda): initialize conf buffer
+
     // configure alert pin
-    struct device *port = device_get_binding(CONFIG_ZBUS_ALERT_PORT);
-    if (port == NULL) {
+    zbus.alert_port = device_get_binding(CONFIG_ZBUS_ALERT_PORT);
+    if (zbus.alert_port == NULL) {
         return -ENODEV;
     }
 
-    gpio_pin_configure(port, CONFIG_ZBUS_ALERT_PIN,
+    gpio_pin_configure(zbus.alert_port, CONFIG_ZBUS_ALERT_PIN,
             GPIO_DIR_OUT | GPIO_PUD_PULL_UP);
 
     // configure SERCOM I²C
     PM->APBCMASK.reg |= PM_APBCMASK_SERCOM0 << CONFIG_ZBUS_SERCOM;
 
+    zbus_reset();
+
     IRQ_DIRECT_CONNECT(IRQ, 0, i2c_isr, 0);
     irq_enable(IRQ);
-
-// TODO mbenda: implement this
-
-    // initialize conf buffer
 
     zbus.state = ZBUS_CONF;
     return 0;
@@ -124,9 +123,13 @@ int zbus_recv(void *buf, int size)
         pthread_cond_wait(&zbus_recv_cond, &zbus_lock);
     }
 
-    // TODO(mbenda): lock this?
+    // set rx data atomically
+    int key = irq_lock();
+
     zbus.rx_data = buf;
     zbus.rx_len = (u8_t) (size > ZBUS_MAX_DATA ? ZBUS_MAX_DATA : size);
+
+    irq_unlock(key);
 
     // wait for transfer to complete
     pthread_cond_wait(&zbus_send_cond, &zbus_lock);
@@ -145,9 +148,13 @@ int zbus_send(const void *buf, int size)
         pthread_cond_wait(&zbus_send_cond, &zbus_lock);
     }
 
-    // TODO(mbenda): lock this?
+    // set tx data atomically
+    int key = irq_lock();
+
     zbus.tx_data = buf;
     zbus.tx_len = (u8_t) (size > ZBUS_MAX_DATA ? ZBUS_MAX_DATA : size);
+
+    irq_unlock(key);
 
     // wait for transfer to complete
     pthread_cond_wait(&zbus_send_cond, &zbus_lock);
@@ -166,7 +173,7 @@ int zbus_reset(void)
 
     // reset I²C and alert pin
     i2c_reset();
-    gpio_pin_write(zbus.alert_port, zbus.alert_pin, 1);
+    gpio_pin_write(zbus.alert_port, CONFIG_ZBUS_ALERT_PIN, 1);
 
     // stop any ongoing transfers
     pthread_cond_broadcast(&zbus_recv_cond);
@@ -483,7 +490,7 @@ static void zbus_worker(void *p1, void *p2, void *p3)
             case CONF_ADDR:
                 // address configuration
                 LOG_DBG("address configuration received");
-                zbus.addr = zbus.buf_addr;
+                zbus.addr = zbus.buf_addr; // FIXME check UDID and set address
                 i2c_enable_ready();
                 break;
 

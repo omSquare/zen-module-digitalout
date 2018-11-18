@@ -4,6 +4,8 @@
 #include <soc.h>
 #include <logging/log.h>
 
+#include "zbus.h"
+
 LOG_MODULE_REGISTER(main);
 
 #define LED_PORT LED0_GPIO_CONTROLLER
@@ -298,21 +300,32 @@ void main(void)
 
 //    i2c_reset();
 
-    i2c_init_slave();
+//    i2c_init_slave();
+
+//    while (true) {
+//        gpio_pin_write(port, LED, active);
+//        k_sleep(200 * p / 20);
+//        gpio_pin_write(port, LED, 1);
+//        k_sleep(200 * p / 20);
+//        gpio_pin_write(port, LED, active);
+//        k_sleep(200 * p / 20);
+//        gpio_pin_write(port, LED, 1);
+//        k_sleep(800 * p / 20);
+////        LOG_INF("baf %d!", p);
+//        p--;
+//        if (p < 0) {
+//            p = 20;
+//        }
+//    }
+
+    zbus_init(&(struct zbus_config) {
+        .udid = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08},
+    });
+
+    u8_t pkt[ZBUS_MAX_DATA];
 
     while (true) {
-        gpio_pin_write(port, LED, active);
-        k_sleep(200 * p / 20);
-        gpio_pin_write(port, LED, 1);
-        k_sleep(200 * p / 20);
-        gpio_pin_write(port, LED, active);
-        k_sleep(200 * p / 20);
-        gpio_pin_write(port, LED, 1);
-        k_sleep(800 * p / 20);
-//        LOG_INF("baf %d!", p);
-        p--;
-        if (p < 0) {
-            p = 20;
-        }
+        int ret = zbus_recv(pkt, sizeof(pkt));
+        LOG_INF("recv: %d", ret);
     }
 }
