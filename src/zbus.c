@@ -324,8 +324,6 @@ void i2c_enable_ready(void)
     irq_enable(IRQ);
 }
 
-int i2c_irq;
-
 void i2c_amatch(void)
 {
     // address match
@@ -412,7 +410,6 @@ void i2c_amatch(void)
 
 void i2c_drdy(void)
 {
-    i2c_irq += 10000;
     // data ready
     bool nak = false;
 
@@ -463,7 +460,6 @@ void i2c_prec(void)
 void i2c_isr(void *arg)
 {
     ARG_UNUSED(arg);
-    i2c_irq++;
 
     // read interrupt flags
     u8_t status = I2C->INTFLAG.reg & I2C->INTENSET.reg;
