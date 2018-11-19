@@ -12,7 +12,7 @@
 #include <posix/pthread.h>
 #include <logging/log.h>
 
-LOG_MODULE_REGISTER(zbus);
+LOG_MODULE_REGISTER(zbus, LOG_LEVEL_DBG);
 
 // "configuration" address
 #define CONF_ADDR 0x76
