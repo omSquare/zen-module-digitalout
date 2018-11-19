@@ -282,26 +282,26 @@ void main(void)
     /* Set up bus clock and GCLK generator. */
     PM->APBCMASK.reg |= PM_APBCMASK_SERCOM5;
 
-//    GCLK->CLKCTRL.reg = GCLK_CLKCTRL_ID(SERCOM3_GCLK_ID_CORE)
-//            | GCLK_CLKCTRL_CLKEN
-//            | GCLK_CLKCTRL_GEN(0);
-//
-//    while (GCLK->STATUS.bit.SYNCBUSY) {
-//        /* Synchronize GCLK. */
-//    }
-//
-//    GCLK->CLKCTRL.reg = GCLK_CLKCTRL_ID(SERCOM3_GCLK_ID_SLOW)
-//            | GCLK_CLKCTRL_CLKEN
-//            | GCLK_CLKCTRL_GEN(1);
-//
-//    while (GCLK->STATUS.bit.SYNCBUSY) {
-//        /* Synchronize GCLK. */
-//    }
+    GCLK->CLKCTRL.reg = GCLK_CLKCTRL_ID(SERCOM5_GCLK_ID_CORE)
+            | GCLK_CLKCTRL_CLKEN
+            | GCLK_CLKCTRL_GEN(0);
+
+    while (GCLK->STATUS.bit.SYNCBUSY) {
+        /* Synchronize GCLK. */
+    }
+
+    GCLK->CLKCTRL.reg = GCLK_CLKCTRL_ID(SERCOM5_GCLK_ID_SLOW)
+            | GCLK_CLKCTRL_CLKEN
+            | GCLK_CLKCTRL_GEN(1);
+
+    while (GCLK->STATUS.bit.SYNCBUSY) {
+        /* Synchronize GCLK. */
+    }
 
 //    i2c_reset();
-
+//
 //    i2c_init_slave();
-
+//
 //    while (true) {
 //        gpio_pin_write(port, LED, active);
 //        k_sleep(200 * p / 20);

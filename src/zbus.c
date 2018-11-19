@@ -73,10 +73,13 @@ static void i2c_isr(void *arg);
 K_FIFO_DEFINE(zbus_fifo);
 
 // TX buffer for POLL replies
-u8_t zbus_poll_buf[8];
+u8_t zbus_poll_buf[2];
 
 // TX buffer for CONF replies
-u8_t zbus_conf_buf[2];
+u8_t zbus_conf_buf[8];
+
+// RX buffer for bus requests
+u8_t zbus_rx_buf[9];
 
 static PTHREAD_MUTEX_DEFINE(zbus_lock);
 static PTHREAD_COND_DEFINE(zbus_recv_cond);
@@ -105,12 +108,10 @@ int zbus_init(struct zbus_config *cfg)
     // configure SERCOM I²C
     PM->APBCMASK.reg |= PM_APBCMASK_SERCOM0 << CONFIG_ZBUS_SERCOM;
 
+    IRQ_DIRECT_CONNECT(IRQ, 0, i2c_isr, 0);
+
     zbus_reset();
 
-    IRQ_DIRECT_CONNECT(IRQ, 0, i2c_isr, 0);
-    irq_enable(IRQ);
-
-    zbus.state = ZBUS_CONF;
     return 0;
 }
 
@@ -251,7 +252,8 @@ static inline int i2c_notify(int ev)
 {
     if (zbus_event.ev) {
         // event not consumed yet
-        k_panic(); // FIXME
+        LOG_ERR("PANIC!");
+//        k_panic(); // FIXME
         return -1;
     }
 
@@ -265,7 +267,9 @@ static void i2c_disable(void)
 {
     I2C->INTENCLR.reg = SERCOM_I2CS_INTENCLR_MASK;
     I2C->INTFLAG.reg = SERCOM_I2CS_INTFLAG_MASK;
-    NVIC_ClearPendingIRQ(IRQ);
+
+//    NVIC_ClearPendingIRQ(IRQ);
+    irq_disable(IRQ);
 
     i2c_sync();
     I2C->CTRLA.reg &= ~SERCOM_I2CS_CTRLA_ENABLE;
@@ -294,6 +298,9 @@ void i2c_enable_conf(void)
 
     i2c_sync();
     I2C->CTRLA.reg |= SERCOM_I2CS_CTRLA_ENABLE;
+    I2C->INTENSET.reg = SERCOM_I2CS_INTENSET_AMATCH;
+
+    irq_enable(IRQ);
 }
 
 void i2c_enable_ready(void)
@@ -313,7 +320,11 @@ void i2c_enable_ready(void)
     i2c_sync();
     I2C->INTENSET.reg = SERCOM_I2CS_INTENSET_AMATCH;
     I2C->CTRLA.reg |= SERCOM_I2CS_CTRLA_ENABLE;
+
+    irq_enable(IRQ);
 }
+
+int i2c_irq;
 
 void i2c_amatch(void)
 {
@@ -368,9 +379,16 @@ void i2c_amatch(void)
         zbus.i2c_read = false;
         zbus.i2c_addr = addr;
 
-        if (zbus.buf_pos > 0) {
-            // buffer is not ready
-            ev |= EV_ERR_DATA;
+        if (addr == zbus.addr) {
+            // data write
+            // TODO(mbenda): implement this
+        } else if (addr == 0) {
+            // general call (command)
+            i2c_init_buf(zbus_rx_buf, 1);
+        } else if (addr == CONF_ADDR) {
+            // configuration write
+            i2c_init_buf(zbus_rx_buf, 8);
+        } else {
             nak = true;
         }
     }
@@ -394,6 +412,7 @@ void i2c_amatch(void)
 
 void i2c_drdy(void)
 {
+    i2c_irq += 10000;
     // data ready
     bool nak = false;
 
@@ -444,6 +463,7 @@ void i2c_prec(void)
 void i2c_isr(void *arg)
 {
     ARG_UNUSED(arg);
+    i2c_irq++;
 
     // read interrupt flags
     u8_t status = I2C->INTFLAG.reg & I2C->INTENSET.reg;
@@ -483,6 +503,7 @@ static void zbus_worker(void *p1, void *p2, void *p3)
             switch (zbus.buf_addr) {
             case 0:
                 // reset
+                // TODO(mbenda): check command
                 LOG_DBG("reset requested");
                 zbus_reset();
                 break;
@@ -497,8 +518,10 @@ static void zbus_worker(void *p1, void *p2, void *p3)
             default:
                 if (zbus.buf_addr == zbus.addr) {
                     // data or ping received
-                    LOG_DBG("data packet received, len=%d", zbus.buf_len);
+                    LOG_INF("data packet received, len=%d", zbus.buf_len);
                     pthread_cond_broadcast(&zbus_recv_cond);
+                } else {
+                    LOG_ERR("unexpected RX addr: %x", zbus.buf_addr);
                 }
                 break;
             }
@@ -521,6 +544,8 @@ static void zbus_worker(void *p1, void *p2, void *p3)
                     // data sent
                     LOG_DBG("data packet sent, len=%d", zbus.buf_len);
                     pthread_cond_broadcast(&zbus_send_cond);
+                } else {
+                    LOG_ERR("unexpected TX addr: %x", zbus.buf_addr);
                 }
                 break;
             }
