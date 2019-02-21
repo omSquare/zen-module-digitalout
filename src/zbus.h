@@ -12,7 +12,7 @@
 //  API  //
 // // // //
 
-typedef uint8_t zbus_addr;
+typedef s8_t zbus_addr;
 
 struct zbus_udid {
     u8_t id[8];

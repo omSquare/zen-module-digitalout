@@ -24,7 +24,7 @@ int main(void)
             continue;
         }
 
-        uint8_t buf[64];
+        u8_t buf[64];
         int n = zbus_recv(dev, buf, sizeof(buf));
         if (n < 0) {
             LOG_ERR("recv error: %d", n);

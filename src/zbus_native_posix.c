@@ -34,7 +34,7 @@ struct zbus_np_data {
 
 struct zbus_np_config {
     char *host;
-    uint16_t port;
+    u16_t port;
 };
 
 static int zbus_np_init(struct device *dev)
@@ -87,7 +87,7 @@ static int zbus_np_connect(struct device *dev)
     }
 
     // perform handshake
-    uint16_t header[2] = {htons(ZBUS_MAGIC), htons(ZBUS_VERSION)};
+    u16_t header[2] = {htons(ZBUS_MAGIC), htons(ZBUS_VERSION)};
     if (send(fd, header, sizeof(header), 0) < sizeof(header)) {
         return -errno;
     }
@@ -110,7 +110,7 @@ static int zbus_np_connect(struct device *dev)
         return -errno;
     }
 
-    uint8_t cmd[2];
+    u8_t cmd[2];
     if (recv(fd, cmd, sizeof(cmd), MSG_WAITALL) < sizeof(cmd)) {
         return -errno;
     }
@@ -152,7 +152,7 @@ static int zbus_np_send(struct device *dev, const void *buf, int size)
         return -ENOTCONN;
     }
 
-    uint8_t header[2] = {CMD_PACKET, (uint8_t) size};
+    u8_t header[2] = {CMD_PACKET, (u8_t) size};
     if (send(data->sock_fd, header, sizeof(header), 0) < sizeof(header)) {
         zbus_np_disconnect(data);
         return -errno;
@@ -178,7 +178,7 @@ static int zbus_np_recv(struct device *dev, void *buf, int size)
         return -ENOTCONN;
     }
 
-    uint8_t header[2];
+    u8_t header[2];
     if (recv(data->sock_fd, header, sizeof(header), MSG_WAITALL) != sizeof(header)) {
         zbus_np_disconnect(data);
         return -errno;
