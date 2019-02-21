@@ -12,6 +12,9 @@
 //  API  //
 // // // //
 
+/** The maximum size of a Zbus data packet. */
+#define ZBUS_MAX_PACKET_LEN 255
+
 typedef s8_t zbus_addr;
 
 struct zbus_udid {

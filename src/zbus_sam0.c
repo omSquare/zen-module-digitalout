@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "zbus.h"
 #include "zbus_sam0.h"
 
 #include <device.h>
@@ -13,6 +14,14 @@
 #include <logging/log.h>
 
 LOG_MODULE_REGISTER(zbus, LOG_LEVEL_DBG);
+
+// TODO(mbenda): use DTS!!!
+#define DT_ZBUS_SAM0_0_LABEL                "zbus0"
+#define DT_ZBUS_SAM0_0_SERCOM_BASE_ADDRESS  0x42001c00UL
+#define DT_ZBUS_SAM0_0_SERCOM_IRQ           12                  + 1 /*FIXME*/
+#define DT_ZBUS_SAM0_0_SERCOM_IRQ_PRIORITY  0
+#define DT_ZBUS_SAM0_0_ALERT_PORT           "PORTA"
+#define DT_ZBUS_SAM0_0_ALERT_PIN            21
 
 // "configuration" address
 #define CONF_ADDR 0x76
@@ -24,7 +33,217 @@ LOG_MODULE_REGISTER(zbus, LOG_LEVEL_DBG);
 #define SERCOM_EVAL(n) SERCOM##n
 
 #define IRQ (SERCOM0_IRQn + CONFIG_ZBUS_SERCOM)
-#define I2C (&SERCOM(CONFIG_ZBUS_SERCOM)->I2CS)
+#define I2CX (&SERCOM(CONFIG_ZBUS_SERCOM)->I2CS)
+
+
+// convenience device accessors
+#define DEV_CFG(dev) ((const struct zbus_sam0_config *) (dev)->config->config_info)
+#define DEV_DATA(dev) ((struct zbus_sam0_data *) (dev)->driver_data)
+#define I2C(dev) (&((Sercom *) DEV_CFG(dev)->sercom_base)->I2CS)
+#define PIN(dev) (DEV_CFG(dev)->alert_pin)
+
+struct zbus_sam0_config {
+    // SERCOM
+    uintptr_t sercom_base;
+    void (*sercom_irq)(struct device *dev);
+
+    // alert signal
+    const char *alert_port;
+    u32_t alert_pin;
+};
+
+struct zbus_sam0_data {
+    // UDID
+    struct zbus_udid udid;
+    // address (0 when not connected)
+    zbus_addr addr;
+
+    // packet receiving
+    u8_t* rx_data;
+    u8_t rx_len;
+
+    // packet sending
+    const u8_t *tx_data;
+    u8_t tx_len;
+
+    // peripherals
+    struct device *alert_port; // TODO(mbenda): direct access via cfg?
+
+    bool i2c_read;
+    s8_t i2c_addr;
+
+    // buffer
+    u8_t buf[ZBUS_MAX_PACKET_LEN];
+    int buf_len;
+    int buf_pos;
+    zbus_addr buf_addr;
+
+    // TODO(mbenda): stats, error counters...
+};
+
+// ----------------------------------------------------------------------
+// driver API implementation
+// ----------------------------------------------------------------------
+
+static int zbus_sam0_init(struct device *dev)
+{
+    const struct zbus_sam0_config *cfg = DEV_CFG(dev);
+    struct zbus_sam0_data *data = DEV_DATA(dev);
+
+    // configure SERCOM
+    cfg->sercom_irq(dev);
+
+    // configure alert pin
+    data->alert_port = device_get_binding(cfg->alert_port);
+    if (data->alert_port == NULL) {
+        return -ENODEV;
+    }
+
+    int err = gpio_pin_configure(data->alert_port, PIN(dev),
+            GPIO_DIR_OUT | GPIO_PUD_PULL_UP);
+    if (err != 0) {
+        return err;
+    }
+
+    return 0;
+}
+
+static int zbus_sam0_configure(struct device *dev, const struct zbus_config *cfg)
+{
+    // TODO(mbenda): disconnect, reset state
+
+    DEV_DATA(dev)->udid = cfg->udid;
+    return 0;
+}
+
+static int zbus_sam0_connect(struct device *dev)
+{
+    // TODO(mbenda): implement this
+    return -1;
+}
+
+static int zbus_sam0_send(struct device *dev, const void *buf, int size)
+{
+    // TODO(mbenda): implement this
+    return -1;
+}
+
+static int zbus_sam0_recv(struct device *dev, void *buf, int size)
+{
+    // TODO(mbenda): implement this
+    return -1;
+}
+
+static const struct zbus_driver_api zbus_sam0_driver_api = {
+        .configure = zbus_sam0_configure,
+        .connect = zbus_sam0_connect,
+        .send = zbus_sam0_send,
+        .recv = zbus_sam0_recv,
+};
+
+// ----------------------------------------------------------------------
+// driver implementation
+// ----------------------------------------------------------------------
+
+static void zbus_sam0_amatch(void);
+static void zbus_sam0_drdy(void);
+static void zbus_sam0_prec(void);
+
+static void zbus_sam0_isr(void *arg)
+{
+    struct device *dev = arg;
+
+    // read interrupt flags
+    u8_t status = I2C(dev)->INTFLAG.reg & I2C(dev)->INTENSET.reg;
+
+    if (status & SERCOM_I2CS_INTFLAG_AMATCH) {
+        zbus_sam0_amatch();
+    } else if (status & SERCOM_I2CS_INTFLAG_DRDY) {
+        zbus_sam0_drdy();
+    } else if (status & SERCOM_I2CS_INTFLAG_PREC) {
+        zbus_sam0_prec();
+    }
+}
+
+static void zbus_sam0_amatch(void)
+{
+    // TODO(mbenda): implement this
+}
+
+static void zbus_sam0_drdy(void)
+{
+    // TODO(mbenda): implement this
+}
+
+static void zbus_sam0_prec(void)
+{
+    // TODO(mbenda): implement this
+}
+
+// ----------------------------------------------------------------------
+// device instances
+// ----------------------------------------------------------------------
+
+#define ZBUS_SAM0_IRQ_HANDLER_DECL(n)                                   \
+static void zbus_sam0_irq_config_##n(struct device *dev)
+#define ZBUS_SAM0_IRQ_HANDLER_FUNC(n)                                   \
+        .sercom_irq = zbus_sam0_irq_config_##n,
+#define ZBUS_SAM0_IRQ_HANDLER(n)                                        \
+static void zbus_sam0_irq_config_##n(struct device *dev)                \
+{                                                                       \
+    IRQ_CONNECT(DT_ZBUS_SAM0_##n##_SERCOM_IRQ,                          \
+                DT_ZBUS_SAM0_##n##_SERCOM_IRQ_PRIORITY,                 \
+                zbus_sam0_isr, DEVICE_GET(zbus_sam0_##n),               \
+                0);                                                     \
+    irq_enable(DT_ZBUS_SAM0_##n##_SERCOM_IRQ);                          \
+}
+
+#define ZBUS_SAM0_CONFIG_DEFN(n)                                        \
+static const struct zbus_sam0_config zbus_sam0_config_##n = {           \
+        .sercom_base = DT_ZBUS_SAM0_##n##_SERCOM_BASE_ADDRESS,          \
+        ZBUS_SAM0_IRQ_HANDLER_FUNC(n)                                   \
+        .alert_port = DT_ZBUS_SAM0_##n##_ALERT_PORT,                    \
+        .alert_pin = DT_ZBUS_SAM0_##n##_ALERT_PIN,                      \
+}
+
+#define ZBUS_SAM0_DEVICE_INIT(n)                                        \
+static struct zbus_sam0_data zbus_sam0_data_##n;                        \
+ZBUS_SAM0_IRQ_HANDLER_DECL(n);                                          \
+ZBUS_SAM0_CONFIG_DEFN(n);                                               \
+DEVICE_AND_API_INIT(zbus_sam0_##n, DT_ZBUS_SAM0_##n##_LABEL,            \
+                    zbus_sam0_init, &zbus_sam0_data_##n,                \
+                    &zbus_sam0_config_##n, APPLICATION,                 \
+                    CONFIG_KERNEL_INIT_PRIORITY_DEVICE,                 \
+                    &zbus_sam0_driver_api);                             \
+ZBUS_SAM0_IRQ_HANDLER(n)
+
+#ifdef DT_ZBUS_SAM0_0_LABEL
+ZBUS_SAM0_DEVICE_INIT(0)
+#endif
+
+#ifdef DT_ZBUS_SAM0_1_LABEL
+ZBUS_SAM0_DEVICE_INIT(1)
+#endif
+
+#ifdef DT_ZBUS_SAM0_2_LABEL
+ZBUS_SAM0_DEVICE_INIT(2)
+#endif
+
+#ifdef DT_ZBUS_SAM0_3_LABEL
+ZBUS_SAM0_DEVICE_INIT(3)
+#endif
+
+#ifdef DT_ZBUS_SAM0_4_LABEL
+ZBUS_SAM0_DEVICE_INIT(4)
+#endif
+
+#ifdef DT_ZBUS_SAM0_5_LABEL
+ZBUS_SAM0_DEVICE_INIT(5)
+#endif
+
+// ----------------------------------------------------------------------
+// OLD OLD OLD OLD OLD OLD OLD OLD OLD OLD OLD OLD OLD OLD OLD OLD OLD
+// ----------------------------------------------------------------------
 
 static struct {
     // the state of the bus
@@ -203,7 +422,7 @@ bool zbus_is_ready_old(void)
 
 static inline void i2c_sync(void)
 {
-    while (I2C->STATUS.reg & SERCOM_I2CS_STATUS_SYNCBUSY) {
+    while (I2CX->STATUS.reg & SERCOM_I2CS_STATUS_SYNCBUSY) {
         // wait for synchronization...
     }
 }
@@ -212,19 +431,19 @@ static inline void i2c_set_ackact(bool ack)
 {
 #ifdef CONFIG_I2C_SAM0_WORKAROUND
     int key = irq_lock();
-    I2C->STATUS.reg = 0;
+    I2CX->STATUS.reg = 0;
 
     if (ack) {
-        I2C->CTRLB.reg = 0;
+        I2CX->CTRLB.reg = 0;
     } else {
-        I2C->CTRLB.reg = SERCOM_I2CS_CTRLB_ACKACT;
+        I2CX->CTRLB.reg = SERCOM_I2CS_CTRLB_ACKACT;
     }
     irq_unlock(key);
 #else /* !CONFIG_I2C_SAM0_WORKAROUND */
     if (ack == true) {
-        I2C->CTRLB.reg &= ~SERCOM_I2CS_CTRLB_ACKACT;
+        I2CX->CTRLB.reg &= ~SERCOM_I2CS_CTRLB_ACKACT;
     } else {
-        I2C->CTRLB.reg |= SERCOM_I2CS_CTRLB_ACKACT;
+        I2CX->CTRLB.reg |= SERCOM_I2CS_CTRLB_ACKACT;
     }
 #endif
 }
@@ -232,12 +451,12 @@ static inline void i2c_set_ackact(bool ack)
 static inline void i2c_amatch_cmd3()
 {
 #ifdef CONFIG_I2C_SAM0_WORKAROUND
-    if (I2C->INTFLAG.bit.PREC) {
-        I2C->INTFLAG.reg = SERCOM_I2CS_INTFLAG_PREC;
+    if (I2CX->INTFLAG.bit.PREC) {
+        I2CX->INTFLAG.reg = SERCOM_I2CS_INTFLAG_PREC;
     }
-    I2C->INTFLAG.reg = SERCOM_I2CS_INTFLAG_AMATCH;
+    I2CX->INTFLAG.reg = SERCOM_I2CS_INTFLAG_AMATCH;
 #else /* !CONFIG_I2C_SAM0_WORKAROUND */
-    I2C->CTRLB.reg = SERCOM_I2CS_CTRLB_CMD(0x3);
+    I2CX->CTRLB.reg = SERCOM_I2CS_CTRLB_CMD(0x3);
 #endif
 }
 
@@ -265,14 +484,14 @@ static inline int i2c_notify(int ev)
 
 static void i2c_disable(void)
 {
-    I2C->INTENCLR.reg = SERCOM_I2CS_INTENCLR_MASK;
-    I2C->INTFLAG.reg = SERCOM_I2CS_INTFLAG_MASK;
+    I2CX->INTENCLR.reg = SERCOM_I2CS_INTENCLR_MASK;
+    I2CX->INTFLAG.reg = SERCOM_I2CS_INTFLAG_MASK;
 
 //    NVIC_ClearPendingIRQ(IRQ);
     irq_disable(IRQ);
 
     i2c_sync();
-    I2C->CTRLA.reg &= ~SERCOM_I2CS_CTRLA_ENABLE;
+    I2CX->CTRLA.reg &= ~SERCOM_I2CS_CTRLA_ENABLE;
 }
 
 void i2c_reset(void)
@@ -280,25 +499,25 @@ void i2c_reset(void)
     i2c_disable();
 
     i2c_sync();
-    I2C->CTRLA.reg |= SERCOM_I2CS_CTRLA_SWRST;
+    I2CX->CTRLA.reg |= SERCOM_I2CS_CTRLA_SWRST;
 }
 
 void i2c_enable_conf(void)
 {
     i2c_sync();
-    I2C->CTRLA.reg = SERCOM_I2CS_CTRLA_MODE_I2C_SLAVE;
+    I2CX->CTRLA.reg = SERCOM_I2CS_CTRLA_MODE_I2C_SLAVE;
     // TODO CTRLA LOWTOUT SDAHOLD
 
     i2c_sync();
-    I2C->CTRLB.reg = SERCOM_I2CS_CTRLB_AMODE(0x00) | SERCOM_I2CS_CTRLB_SMEN;
+    I2CX->CTRLB.reg = SERCOM_I2CS_CTRLB_AMODE(0x00) | SERCOM_I2CS_CTRLB_SMEN;
 
     i2c_sync();
-    I2C->ADDR.reg =
+    I2CX->ADDR.reg =
             SERCOM_I2CS_ADDR_ADDR(CONF_ADDR) | SERCOM_I2CS_ADDR_GENCEN;
 
     i2c_sync();
-    I2C->CTRLA.reg |= SERCOM_I2CS_CTRLA_ENABLE;
-    I2C->INTENSET.reg = SERCOM_I2CS_INTENSET_AMATCH;
+    I2CX->CTRLA.reg |= SERCOM_I2CS_CTRLA_ENABLE;
+    I2CX->INTENSET.reg = SERCOM_I2CS_INTENSET_AMATCH;
 
     irq_enable(IRQ);
 }
@@ -310,16 +529,16 @@ void i2c_enable_ready(void)
 
     // reconfigure address matching
     i2c_sync();
-    I2C->CTRLB.reg = SERCOM_I2CS_CTRLB_AMODE(0x01) | SERCOM_I2CS_CTRLB_SMEN;
+    I2CX->CTRLB.reg = SERCOM_I2CS_CTRLB_AMODE(0x01) | SERCOM_I2CS_CTRLB_SMEN;
 
     i2c_sync();
-    I2C->ADDR.reg =
+    I2CX->ADDR.reg =
             SERCOM_I2CS_ADDR_ADDR(zbus.addr) | SERCOM_I2CS_ADDR_GENCEN
                     | SERCOM_I2CS_ADDR_ADDRMASK(POLL_ADDR);
 
     i2c_sync();
-    I2C->INTENSET.reg = SERCOM_I2CS_INTENSET_AMATCH;
-    I2C->CTRLA.reg |= SERCOM_I2CS_CTRLA_ENABLE;
+    I2CX->INTENSET.reg = SERCOM_I2CS_INTENSET_AMATCH;
+    I2CX->CTRLA.reg |= SERCOM_I2CS_CTRLA_ENABLE;
 
     irq_enable(IRQ);
 }
@@ -329,19 +548,19 @@ void i2c_amatch(void)
     // address match
     int ev = 0;
 
-    if (I2C->STATUS.reg & (SERCOM_I2CS_STATUS_BUSERR
+    if (I2CX->STATUS.reg & (SERCOM_I2CS_STATUS_BUSERR
             | SERCOM_I2CS_STATUS_COLL | SERCOM_I2CS_STATUS_LOWTOUT)) {
         // a bus error occurred
         ev |= EV_ERR_BUS;
     }
 
     // get the address and check direction
-    u8_t addr = I2C->DATA.reg >> 1;
+    u8_t addr = I2CX->DATA.reg >> 1;
     bool nak = false;
 
     // TODO(mbenda): check buf readiness?
 
-    if (I2C->STATUS.reg & SERCOM_I2CS_STATUS_DIR) {
+    if (I2CX->STATUS.reg & SERCOM_I2CS_STATUS_DIR) {
         // master reads data
         zbus.i2c_read = true;
 
@@ -396,7 +615,7 @@ void i2c_amatch(void)
         i2c_set_ackact(false);
     } else {
         i2c_set_ackact(true);
-        I2C->INTENSET.reg = SERCOM_I2CS_INTENSET_DRDY
+        I2CX->INTENSET.reg = SERCOM_I2CS_INTENSET_DRDY
                 | SERCOM_I2CS_INTENSET_PREC;
     }
 
@@ -415,14 +634,14 @@ void i2c_drdy(void)
 
     if (zbus.i2c_read) {
         // master is reading, send another byte
-        if (zbus.buf_pos > 0 && (I2C->STATUS.reg & SERCOM_I2CS_STATUS_RXNACK)) {
+        if (zbus.buf_pos > 0 && (I2CX->STATUS.reg & SERCOM_I2CS_STATUS_RXNACK)) {
             // master NAK
             nak = true;
         } else if (zbus.buf_pos >= zbus.buf_len) {
             // buffer underflow
             nak = true;
         } else {
-            I2C->DATA.reg = zbus.buf[zbus.buf_pos++];
+            I2CX->DATA.reg = zbus.buf[zbus.buf_pos++];
         }
     } else {
         // master is writing, receive another byte
@@ -430,15 +649,15 @@ void i2c_drdy(void)
             // buffer overflow
             nak = true;
         } else {
-            zbus.buf[zbus.buf_pos++] = I2C->DATA.reg;
+            zbus.buf[zbus.buf_pos++] = I2CX->DATA.reg;
         }
     }
 
     if (nak) {
         // terminate the transfer
         i2c_set_ackact(false);
-        I2C->CTRLB.reg |= SERCOM_I2CS_CTRLB_CMD(0x2);
-        I2C->INTENCLR.reg = SERCOM_I2CS_INTENSET_DRDY
+        I2CX->CTRLB.reg |= SERCOM_I2CS_CTRLB_CMD(0x2);
+        I2CX->INTENCLR.reg = SERCOM_I2CS_INTENSET_DRDY
                 | SERCOM_I2CS_INTENSET_PREC;
 
         // TODO(mbenda): store error and send it with "done" event?
@@ -449,8 +668,8 @@ void i2c_drdy(void)
 void i2c_prec(void)
 {
     // stop received
-    I2C->INTFLAG.reg = SERCOM_I2CS_INTFLAG_PREC;
-    I2C->INTENCLR.reg = SERCOM_I2CS_INTENSET_DRDY
+    I2CX->INTFLAG.reg = SERCOM_I2CS_INTFLAG_PREC;
+    I2CX->INTENCLR.reg = SERCOM_I2CS_INTENSET_DRDY
             | SERCOM_I2CS_INTENSET_PREC;
 
     zbus.buf_addr = zbus.i2c_addr;
@@ -462,7 +681,7 @@ void i2c_isr(void *arg)
     ARG_UNUSED(arg);
 
     // read interrupt flags
-    u8_t status = I2C->INTFLAG.reg & I2C->INTENSET.reg;
+    u8_t status = I2CX->INTFLAG.reg & I2CX->INTENSET.reg;
 
     if (status & SERCOM_I2CS_INTFLAG_AMATCH) {
         i2c_amatch();

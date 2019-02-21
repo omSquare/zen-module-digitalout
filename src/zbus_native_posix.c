@@ -37,12 +37,13 @@ struct zbus_np_config {
     u16_t port;
 };
 
+// ----------------------------------------------------------------------
+// driver API implementation
+// ----------------------------------------------------------------------
+
 static int zbus_np_init(struct device *dev)
 {
-    struct zbus_np_data *data = dev->driver_data;
-    memset(data, 0, sizeof(struct zbus_np_data));
-    data->sock_fd = -1;
-
+    // nothing to do
     return 0;
 }
 
@@ -142,7 +143,7 @@ static void zbus_np_disconnect(struct zbus_np_data *data)
 
 static int zbus_np_send(struct device *dev, const void *buf, int size)
 {
-    if (size < 0 || size > 255) {
+    if (size < 0 || size > ZBUS_MAX_PACKET_LEN) {
         return -EINVAL;
     }
 
@@ -168,7 +169,7 @@ static int zbus_np_send(struct device *dev, const void *buf, int size)
 
 static int zbus_np_recv(struct device *dev, void *buf, int size)
 {
-    if (size < 0 || size > 255) {
+    if (size < 0 || size > ZBUS_MAX_PACKET_LEN) {
         return -EINVAL;
     }
 
@@ -214,16 +215,26 @@ static const struct zbus_driver_api zbus_np_driver_api = {
         .recv = zbus_np_recv,
 };
 
+// ----------------------------------------------------------------------
+// device instances
+// ----------------------------------------------------------------------
+
 static const struct zbus_np_config zbus_np_cfg0 = {
         .host = "localhost",
         .port = 7802,
 };
 
-static struct zbus_np_data zbus_np_data0;
+static struct zbus_np_data zbus_np_data0 = {
+        .sock_fd = -1,
+};
 
 DEVICE_AND_API_INIT(uart_native_posix0, "zbus0", zbus_np_init,
                     &zbus_np_data0, &zbus_np_cfg0, APPLICATION,
                     CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &zbus_np_driver_api);
+
+// ----------------------------------------------------------------------
+// cleanup
+// ----------------------------------------------------------------------
 
 static void zbus_np_cleanup(void)
 {

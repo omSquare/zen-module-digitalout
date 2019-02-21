@@ -8,6 +8,8 @@
 
 #include <zephyr.h>
 
+#include "zbus.h"
+
 /**
  * Configuration.
  */
