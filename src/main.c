@@ -15,6 +15,10 @@ int main(void)
     LOG_INF("starting");
 
     struct device *dev = device_get_binding("zbus0");
+    struct zbus_config cfg = {
+            .udid = {.id = {0, 0, 0, 0, 0, 0, 0, 1}},
+    };
+    zbus_configure(dev, &cfg);
 
     for (;;) {
         int err = zbus_connect(dev);
