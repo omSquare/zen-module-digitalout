@@ -92,7 +92,7 @@ K_THREAD_DEFINE(zbus_thread, 1024, zbus_worker, NULL, NULL, NULL, -1, 0,
 // Zbus API
 // ----------------------------------------------------------------------
 
-int zbus_init(struct zbus_cfg *cfg)
+int zbus_init_old(struct zbus_cfg *cfg)
 {
     // TODO(mbenda): initialize conf buffer
 
@@ -110,12 +110,12 @@ int zbus_init(struct zbus_cfg *cfg)
 
     IRQ_DIRECT_CONNECT(IRQ, 0, i2c_isr, 0);
 
-    zbus_reset();
+    zbus_reset_old();
 
     return 0;
 }
 
-int zbus_recv(void *buf, int size)
+int zbus_recv_old(void *buf, int size)
 {
     pthread_mutex_lock(&zbus_lock);
 
@@ -140,7 +140,7 @@ int zbus_recv(void *buf, int size)
     return 0;
 }
 
-int zbus_send(const void *buf, int size)
+int zbus_send_old(const void *buf, int size)
 {
     pthread_mutex_lock(&zbus_lock);
 
@@ -165,7 +165,7 @@ int zbus_send(const void *buf, int size)
     return 0;
 }
 
-int zbus_reset(void)
+int zbus_reset_old(void)
 {
     pthread_mutex_lock(&zbus_lock);
 
@@ -190,7 +190,7 @@ int zbus_reset(void)
     return 0;
 }
 
-bool zbus_is_ready(void)
+bool zbus_is_ready_old(void)
 {
     return zbus.state == ZBUS_READY;
 }
@@ -501,7 +501,7 @@ static void zbus_worker(void *p1, void *p2, void *p3)
                 // reset
                 // TODO(mbenda): check command
                 LOG_DBG("reset requested");
-                zbus_reset();
+                zbus_reset_old();
                 break;
 
             case CONF_ADDR:

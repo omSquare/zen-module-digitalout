@@ -67,7 +67,7 @@ int zbus_connect(struct device *dev)
  * @return 0 on success, -errno on failure
  */
 static inline
-int zbus_sendX(struct device *dev, const void *buf, int size)
+int zbus_send(struct device *dev, const void *buf, int size)
 {
     return ((struct zbus_driver_api *) dev->driver_api)->send(dev, buf, size);
 }
@@ -81,7 +81,7 @@ int zbus_sendX(struct device *dev, const void *buf, int size)
  * @return number of received bytes on success, -errno on failure
  */
 static inline
-int zbus_recvX(struct device *dev, void *buf, int size)
+int zbus_recv(struct device *dev, void *buf, int size)
 {
     return ((struct zbus_driver_api *) dev->driver_api)->recv(dev, buf, size);
 }

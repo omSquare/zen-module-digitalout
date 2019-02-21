@@ -25,7 +25,7 @@ int main(void)
         }
 
         uint8_t buf[64];
-        int n = zbus_recvX(dev, buf, sizeof(buf));
+        int n = zbus_recv(dev, buf, sizeof(buf));
         if (n < 0) {
             LOG_ERR("recv error: %d", n);
             continue;
@@ -40,7 +40,7 @@ int main(void)
             buf[i] = (buf[i] >> 4) | (buf[i] << 4);
         }
 
-        n = zbus_sendX(dev, buf, n);
+        n = zbus_send(dev, buf, n);
         if (n < 0) {
             LOG_ERR("send error: %d", n);
             continue;

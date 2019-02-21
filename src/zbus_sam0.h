@@ -43,7 +43,7 @@ struct zbus_cfg {
  * @param bus
  * @return
  */
-int zbus_init(struct zbus_cfg *cfg);
+int zbus_init_old(struct zbus_cfg *cfg);
 
 /**
  * Receives a data packet from the master.
@@ -52,7 +52,7 @@ int zbus_init(struct zbus_cfg *cfg);
  * @param size size of the buffer
  * @return number of received bytes on success, -errno on failure
  */
-int zbus_recv(void *buf, int size); // blocks
+int zbus_recv_old(void *buf, int size); // blocks
 
 /**
  * Sends the specified data to the master.
@@ -61,18 +61,18 @@ int zbus_recv(void *buf, int size); // blocks
  * @param size size of the buffer
  * @return 0 on success, -errno on failure
  */
-int zbus_send(const void *buf, int size); // blocks
+int zbus_send_old(const void *buf, int size); // blocks
 
 /**
  * Resets the state of the bus and starts its configuration phase.
  *
  * @return 0 on success, -errno on failure
  */
-int zbus_reset(void);
+int zbus_reset_old(void);
 
 /**
  * Checks if the bus is ready.
  *
  * @return true if ready, false if not (off or configuring)
  */
-bool zbus_is_ready(void);
+bool zbus_is_ready_old(void);

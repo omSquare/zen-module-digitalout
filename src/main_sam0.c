@@ -320,14 +320,14 @@ void main(void)
 //        }
 //    }
 
-    zbus_init(&(struct zbus_cfg) {
-        .udid = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08},
+    zbus_init_old(&(struct zbus_cfg) {
+            .udid = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08},
     });
 
     u8_t pkt[ZBUS_MAX_DATA];
 
     while (true) {
-        int ret = zbus_recv(pkt, sizeof(pkt));
+        int ret = zbus_recv_old(pkt, sizeof(pkt));
         LOG_INF("recv: %d", ret);
     }
 }
