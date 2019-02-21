@@ -1,78 +1,81 @@
 /*
- * Copyright (c) 2018 omSquare s.r.o.
+ * Copyright (c) 2019 omSquare s.r.o.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #pragma once
 
-#include <zephyr.h>
+#include <device.h>
 
-/**
- * Configuration.
- */
-#define CONFIG_ZBUS_SERCOM 5
-#define CONFIG_ZBUS_ALERT_PORT "PORTA"
-#define CONFIG_ZBUS_ALERT_PIN 21
-#define CONFIG_I2C_SAM0_WORKAROUND 1
+// // // //
+//  API  //
+// // // //
 
-/** The maximum size of a Zbus data packet. */
-#define ZBUS_MAX_DATA 128
-
-/**
- * Enumeration of all possible Zbus states.
- */
-enum zbus_state {
-    ZBUS_OFF,   // The initial state before zbus_init is called.
-    ZBUS_CONF,  // The configuration phase.
-    ZBUS_READY, // The ready state when data packets can be sent and received.
-};
-
-/**
- * The configuration of a Zbus device.
- */
 struct zbus_config {
     // UDID
     u8_t udid[8];
-    // TODO(mbenda): other device attributes (flags, vendor, type)
+
+    // TODO(mbenda): flags, device class etc.
+};
+
+struct zbus_driver_api {
+    int (*configure)(struct device *dev, const struct zbus_config *cfg);
+    int (*connect)(struct device *dev);
+    int (*send)(struct device *dev, const void *buf, int size);
+    int (*recv)(struct device *dev, void *buf, int size);
 };
 
 /**
- * Initializes the bus.
+ * Initializes the Zbus driver. Disconnects it if it is connected.
  *
- * @param bus
- * @return
+ * @param dev the Zbus device
+ * @param cfg the Zbus configuration
+ * @return 0 on success, -errno on failure
  */
-int zbus_init(struct zbus_config *cfg);
+static inline
+int zbus_configure(struct device *dev, const struct zbus_config *cfg)
+{
+    return ((struct zbus_driver_api *) dev->driver_api)->configure(dev, cfg);
+}
 
 /**
- * Receives a data packet from the master.
+ * Ensures that the slave is connected to a master and properly configured. Does
+ * nothing if already connected and configured.
  *
- * @param buf data buffer to store received bytes
- * @param size size of the buffer
- * @return number of received bytes on success, -errno on failure
+ * @param dev the Zbus device
+ * @return
  */
-int zbus_recv(void *buf, int size); // blocks
+static inline
+int zbus_connect(struct device *dev)
+{
+    return ((struct zbus_driver_api *) dev->driver_api)->connect(dev);
+}
 
 /**
  * Sends the specified data to the master.
  *
+ * @param dev the Zbus device
  * @param buf data buffer to send
  * @param size size of the buffer
  * @return 0 on success, -errno on failure
  */
-int zbus_send(const void *buf, int size); // blocks
+static inline
+int zbus_sendX(struct device *dev, const void *buf, int size)
+{
+    return ((struct zbus_driver_api *) dev->driver_api)->send(dev, buf, size);
+}
 
 /**
- * Resets the state of the bus and starts its configuration phase.
+ * Receives a data packet from the master.
  *
- * @return 0 on success, -errno on failure
+ * @param dev the Zbus device
+ * @param buf data buffer to store received bytes
+ * @param size size of the buffer
+ * @return number of received bytes on success, -errno on failure
  */
-int zbus_reset(void);
-
-/**
- * Checks if the bus is ready.
- *
- * @return true if ready, false if not (off or configuring)
- */
-bool zbus_is_ready(void);
+static inline
+int zbus_recvX(struct device *dev, void *buf, int size)
+{
+    return ((struct zbus_driver_api *) dev->driver_api)->recv(dev, buf, size);
+}

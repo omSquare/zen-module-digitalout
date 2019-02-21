@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "zbus.h"
+#include "zbus_sam0.h"
 
 #include <device.h>
 #include <soc.h>
@@ -92,7 +92,7 @@ K_THREAD_DEFINE(zbus_thread, 1024, zbus_worker, NULL, NULL, NULL, -1, 0,
 // Zbus API
 // ----------------------------------------------------------------------
 
-int zbus_init(struct zbus_config *cfg)
+int zbus_init(struct zbus_cfg *cfg)
 {
     // TODO(mbenda): initialize conf buffer
 

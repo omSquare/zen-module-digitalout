@@ -4,6 +4,8 @@
 #include <soc.h>
 #include <logging/log.h>
 
+#include "zbus_sam0.h"
+
 #include "zbus.h"
 
 LOG_MODULE_REGISTER(main);
@@ -318,7 +320,7 @@ void main(void)
 //        }
 //    }
 
-    zbus_init(&(struct zbus_config) {
+    zbus_init(&(struct zbus_cfg) {
         .udid = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08},
     });
 
