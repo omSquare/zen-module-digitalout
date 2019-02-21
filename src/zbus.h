@@ -12,9 +12,15 @@
 //  API  //
 // // // //
 
+typedef uint8_t zbus_addr;
+
+struct zbus_udid {
+    u8_t id[8];
+};
+
 struct zbus_config {
     // UDID
-    u8_t udid[8];
+    struct zbus_udid udid;
 
     // TODO(mbenda): flags, device class etc.
 };
